@@ -1,0 +1,9 @@
+Sun May 24 23:37:51 2020
+ERROR: Could not open activation key file mjkey.txt
+
+Sun May 24 23:38:03 2020
+ERROR: Could not open activation key file mjkey.txt
+
+Sun May 24 23:38:07 2020
+ERROR: Could not open activation key file ~/.mujoco/mjkey.txt
+
