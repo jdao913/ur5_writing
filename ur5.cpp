@@ -49,6 +49,8 @@ const char help_title[] =
         "Object rotate\n"
         "Object translate";
 
+static int fontscale = mjFONTSCALE_200;
+
 // keyboard callback
 void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
     ur5_t* r = (ur5_t*) glfwGetWindowUserPointer(window);
@@ -153,14 +155,14 @@ void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
                     mj_step(r->m, r->d);
                 }
             } break;
-            // case GLFW_KEY_LEFT: {       // step backward
-            //     if (v->paused) {
-            //         double dt = v->m->opt.timestep;
-            //         v->m->opt.timestep = -dt;
-            //         mj_step_fp(v->m, v->d);
-            //         v->m->opt.timestep = dt;
-            //     }
-            // } break;
+            case GLFW_KEY_LEFT: {       // step backward
+                if (r->paused) {
+                    double dt = r->m->opt.timestep;
+                    r->m->opt.timestep = -dt;
+                    mj_step(r->m, r->d);
+                    r->m->opt.timestep = dt;
+                }
+            } break;
             case GLFW_KEY_DOWN: {      // step forward 100
                 if (r->paused) {
                     for (int i = 0; i < 100; i++) {
@@ -168,31 +170,31 @@ void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
                     }
                 }
             } break;
-            // case GLFW_KEY_UP: {       // step back 100
-            //     if (v->paused) {
-            //         double dt = v->m->opt.timestep;
-            //         v->m->opt.timestep = -dt;
-            //         for (int i = 0; i < 100; i++) {
-            //             mj_step_fp(v->m, v->d);
-            //         }
-            //         v->m->opt.timestep = dt;
-            //     }
-            // } break;
+            case GLFW_KEY_UP: {       // step back 100
+                if (r->paused) {
+                    double dt = r->m->opt.timestep;
+                    r->m->opt.timestep = -dt;
+                    for (int i = 0; i < 100; i++) {
+                        mj_step(r->m, r->d);
+                    }
+                    r->m->opt.timestep = dt;
+                }
+            } break;
             case GLFW_KEY_ESCAPE: {     // free camera
                 r->cam.type = mjCAMERA_FREE;
             } break;
-            // case GLFW_KEY_EQUAL: {      // bigger font
-            //     if (fontscale < 200) {
-            //         fontscale += 50;
-            //         mjr_makeContext(r->m, &r->con, fontscale);
-            //     }
-            // } break;
-            // case GLFW_KEY_MINUS: {      // smaller font
-            //     if (fontscale > 100) {
-            //         fontscale -= 50;
-            //         mjr_makeContext(r->m, &r->con, fontscale);
-            //     }
-            // } break;
+            case GLFW_KEY_EQUAL: {      // bigger font
+                if (fontscale < 200) {
+                    fontscale += 50;
+                    mjr_makeContext(r->m, &r->con, fontscale);
+                }
+            } break;
+            case GLFW_KEY_MINUS: {      // smaller font
+                if (fontscale > 100) {
+                    fontscale -= 50;
+                    mjr_makeContext(r->m, &r->con, fontscale);
+                }
+            } break;
             case GLFW_KEY_LEFT_BRACKET: {  // '[' previous fixed camera or free
                 int fixedcam = r->cam.type;
                 if (r->m->ncam > 0 && fixedcam == mjCAMERA_FIXED) {

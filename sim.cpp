@@ -16,16 +16,22 @@ int main(int argc, const char** argv)
     ur5_t* robot = ur5_init();
 
     bool render_state = ur5_render(robot);
+    double render_time = 60.0;
     // run main loop, target real-time simulation and 60 fps rendering
     while( render_state ) {
         
+        if (robot->slowmotion) {
+            render_time = 600.0;
+        } else {
+            render_time = 60.0;
+        }
         // advance interactive simulation for 1/60 sec
         //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
         //  this loop will finish on time for the next frame to be rendered at 60 fps.
         //  Otherwise add a cpu timer and exit this loop when it is time to render.
         if (!robot->paused) {
             mjtNum simstart = robot->d->time;
-            while( robot->d->time - simstart < 1.0/60.0 )
+            while( robot->d->time - simstart < 1.0/render_time )
                 mj_step(robot->m, robot->d);
         }
 
