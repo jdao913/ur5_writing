@@ -189,12 +189,12 @@ def main():
                           "speed"  : trajectory.vels,
                           "orient" : trajectory.thetas}
 
-    with open("command_trajectory.pkl", "wb") as f:
-        pickle.dump(command_trajectory, f)
+    #with open("command_trajectory.pkl", "wb") as f:
+    #    pickle.dump(command_trajectory, f)
         #print("wrote pickle file")
-        
+
     #np.savetxt('letter_case.csv', np.array(trajectory.positions)[:,0:2], delimiter=",")
-    np.savetxt('a_cap.csv', np.array(trajectory.positions)[:,0:2], delimiter=",")
+    np.savetxt('z_cap.csv', np.array(trajectory.positions)[:,0:2], delimiter=",")
     #print("wrote waypoints to csv file. use add_waypoints.py script to visualize them in mujoco")
     #print(" (ex.)  --  python add_waypoints.py -i \"../cassie/cassiemujoco/cassie.xml\" -o \"../cassie/cassiemujoco/cassie_waypoints.xml\" -w \"waypoints.csv\"")
 
