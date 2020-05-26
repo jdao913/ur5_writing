@@ -52,12 +52,172 @@ const char help_title[] =
 // keyboard callback
 void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods) {
     ur5_t* r = (ur5_t*) glfwGetWindowUserPointer(window);
-    // backspace: reset simulation
-    if( act==GLFW_PRESS && key==GLFW_KEY_BACKSPACE )
-    {
-        mj_resetData(r->m, r->d);
-        mj_forward(r->m, r->d);
+
+    if (act == GLFW_RELEASE) {
+        return;
+    } else if (act == GLFW_PRESS) {
+        // control keys
+        if (mods == GLFW_MOD_CONTROL) {
+            if (key == GLFW_KEY_A) {
+                memcpy(r->cam.lookat, r->m->stat.center, sizeof(r->cam.lookat));
+                r->cam.distance = 1.5*r->m->stat.extent;
+                // set to free camera
+                r->cam.type = mjCAMERA_FREE;
+            } else if (key == GLFW_KEY_P) {
+                printf("qpos: ");
+                for (int i = 0; i < r->m->nq; i++) {
+                    printf("%f", r->d->qpos[i]);
+                    if (i != r->m->nq-1) {
+                        printf(", ");
+                    }
+                }
+                printf("\n");
+                // mju_printMat_fp(v->d->qpos, v->m->nq, 1);
+            } else if (key == GLFW_KEY_Q) {
+                glfwSetWindowShouldClose(window, true);
+            }
+        }
+        // toggle visualiztion flag
+        for (int i=0; i < mjNVISFLAG; i++) {
+            if (key == mjVISSTRING[i][2][0]) {
+                mjtByte flags[mjNVISFLAG];
+                memcpy(flags, r->opt.flags, sizeof(flags));
+                flags[i] = flags[i] == 0 ? 1 : 0;
+                memcpy(r->opt.flags, flags, sizeof(r->opt.flags));
+                return;
+            }
+        }
+        // toggle rendering flag
+        for (int i=0; i < mjNRNDFLAG; i++) {
+            if (key == mjRNDSTRING[i][2][0]) {
+                mjtByte flags[mjNRNDFLAG];
+                memcpy(flags, r->scn.flags, sizeof(flags));
+                flags[i] = flags[i] == 0 ? 1 : 0;
+                memcpy(r->scn.flags, flags, sizeof(r->scn.flags));
+                return;
+            }
+        }
+        // toggle geom/site group
+        for (int i=0; i < mjNGROUP; i++) {
+            if (key == i + 48) {    // Int('0') = 48
+                if (mods && GLFW_MOD_SHIFT == true) {
+                    mjtByte sitegroup[mjNGROUP];
+                    memcpy(sitegroup, r->opt.sitegroup, sizeof(sitegroup));
+                    sitegroup[i] = sitegroup[i] > 0 ? 0 : 1;
+                    // memcpy(v->opt.sitegroup = sitegroup
+                    r->opt.sitegroup[i] = sitegroup[i];
+                    return;
+                } else {
+                    mjtByte geomgroup[mjNGROUP];
+                    memcpy(geomgroup, r->opt.geomgroup, sizeof(geomgroup));
+                    geomgroup[i] = geomgroup[i] > 0 ? 0 : 1;
+                    memcpy(r->opt.geomgroup, geomgroup, sizeof(r->opt.geomgroup));
+                    return;
+                }
+            }
+        }
+        switch (key) {
+            case GLFW_KEY_F1: {     // help
+                r->showhelp += 1;
+                if (r->showhelp > 1) {
+                    r->showhelp = 0;
+                }
+            } break;
+            case GLFW_KEY_F2: {     // option
+                r->showoption = !r->showoption;
+            } break;
+            case GLFW_KEY_F3: {     // info
+                r->showinfo = !r->showinfo;
+            } break;
+            case GLFW_KEY_F5: {     // toggle fullscreen
+                r->showfullscreen = !r->showfullscreen;
+                r->showfullscreen ? glfwMaximizeWindow(window) : glfwRestoreWindow(window);
+            } break;
+            // case GLFW_KEY_F7: {     // sensor figure
+            //     v->showsensor = !v->showsensor;
+            // } break;
+            case GLFW_KEY_ENTER: {  // slow motion
+                r->slowmotion = !r->slowmotion;
+                // r->slowmotion ? printf("Slow Motion Mode!\n") : printf("Normal Speed Mode!\n");
+            } break;
+            case GLFW_KEY_SPACE: {  // pause
+                r->paused = !r->paused;
+                // r->paused ? printf("Paused\n") : printf("Running\n");
+            } break;
+            case GLFW_KEY_BACKSPACE: {  // reset
+                mj_resetData(r->m, r->d);
+                mj_forward(r->m, r->d);
+            } break;
+            case GLFW_KEY_RIGHT: {      // step forward
+                if (r->paused) {
+                    mj_step(r->m, r->d);
+                }
+            } break;
+            // case GLFW_KEY_LEFT: {       // step backward
+            //     if (v->paused) {
+            //         double dt = v->m->opt.timestep;
+            //         v->m->opt.timestep = -dt;
+            //         mj_step_fp(v->m, v->d);
+            //         v->m->opt.timestep = dt;
+            //     }
+            // } break;
+            case GLFW_KEY_DOWN: {      // step forward 100
+                if (r->paused) {
+                    for (int i = 0; i < 100; i++) {
+                        mj_step(r->m, r->d);
+                    }
+                }
+            } break;
+            // case GLFW_KEY_UP: {       // step back 100
+            //     if (v->paused) {
+            //         double dt = v->m->opt.timestep;
+            //         v->m->opt.timestep = -dt;
+            //         for (int i = 0; i < 100; i++) {
+            //             mj_step_fp(v->m, v->d);
+            //         }
+            //         v->m->opt.timestep = dt;
+            //     }
+            // } break;
+            case GLFW_KEY_ESCAPE: {     // free camera
+                r->cam.type = mjCAMERA_FREE;
+            } break;
+            // case GLFW_KEY_EQUAL: {      // bigger font
+            //     if (fontscale < 200) {
+            //         fontscale += 50;
+            //         mjr_makeContext(r->m, &r->con, fontscale);
+            //     }
+            // } break;
+            // case GLFW_KEY_MINUS: {      // smaller font
+            //     if (fontscale > 100) {
+            //         fontscale -= 50;
+            //         mjr_makeContext(r->m, &r->con, fontscale);
+            //     }
+            // } break;
+            case GLFW_KEY_LEFT_BRACKET: {  // '[' previous fixed camera or free
+                int fixedcam = r->cam.type;
+                if (r->m->ncam > 0 && fixedcam == mjCAMERA_FIXED) {
+                    int fixedcamid = r->cam.fixedcamid;
+                    if (fixedcamid  > 0) {
+                        r->cam.fixedcamid = fixedcamid-1;
+                    } else {
+                        r->cam.type = mjCAMERA_FREE;
+                    }
+                }
+            } break;
+            case GLFW_KEY_RIGHT_BRACKET: {  // ']' next fixed camera
+                if (r->m->ncam > 0) {
+                    int fixedcam = r->cam.type;
+                    int fixedcamid = r->cam.fixedcamid;
+                    if (fixedcam != mjCAMERA_FIXED) {
+                        r->cam.type = mjCAMERA_FIXED;
+                    } else if (fixedcamid < r->m->ncam - 1) {
+                        r->cam.fixedcamid = fixedcamid+1;
+                    }
+                }
+            } break;
+        }
     }
+
 }
 
 

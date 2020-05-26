@@ -23,9 +23,11 @@ int main(int argc, const char** argv)
         //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
         //  this loop will finish on time for the next frame to be rendered at 60 fps.
         //  Otherwise add a cpu timer and exit this loop when it is time to render.
-        mjtNum simstart = robot->d->time;
-        while( robot->d->time - simstart < 1.0/60.0 )
-            mj_step(robot->m, robot->d);
+        if (!robot->paused) {
+            mjtNum simstart = robot->d->time;
+            while( robot->d->time - simstart < 1.0/60.0 )
+                mj_step(robot->m, robot->d);
+        }
 
         render_state = ur5_render(robot);
     }
