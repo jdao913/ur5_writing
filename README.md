@@ -5,7 +5,8 @@ A project to produce handwritten characters with a UR5 manipulator robot.
 ## Installation and Setup
 
 This project requires [MuJoCo](http://www.mujoco.org/index.html) which can be downloaded [here](https://www.roboti.us/index.html). A license file for MuJoCo (mjkey.txt) is required to run the simulation. A trial or student license can be obtained for free [here](https://www.roboti.us/license.html). Once you have MuJoCo downloaded and a valid `mjkey.txt`, it is suggested that you place both in a hidden `.mujoco` directory in your home directory. You must then set the `MUJOCO_KEY_PATH` environment variable to be where your MuJoCo license key is located (i.e. `~/.mujoco/mjkey.txt`). This can be done by adding `export MUJOCO_KEY_PATH = <path to mjkey.txt>` to your `.bashrc`.
-You should then be able to compile and run simulation by running `make sim`
+You should then be able to compile and run simulation by running `make sim`.
+To cross-compile for Windows, use `make PLATFORM=WIN`. (NOT TESTED)
 
 ## Visualization Features
 The F1 key will display a help screen that lists the most useful of the following functions.
