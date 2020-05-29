@@ -1,5 +1,11 @@
 #include "mujoco.h"
-#include "ur5.h"
+// #include "ur5.h"
+#include "mj_robot.h"
+#include "stdio.h"
+#include "string.h"
+#include "mjxmacro.h"
+#include "uitools.h"
+#include <iostream>
 
 // main function
 int main(int argc, const char** argv)
@@ -13,12 +19,14 @@ int main(int argc, const char** argv)
     if( !glfwInit() )
         mju_error("Could not initialize GLFW");
 
-    ur5_t* robot = ur5_init();
+    // ur5_t* robot = ur5_init();
+    mjr_t* robot = mjr_init("./model/ur5.xml");
 
-    bool render_state = ur5_render(robot);
+    // bool render_state = ur5_render(robot);
+    bool render_state = mjr_render(robot);
     double render_time = 60.0;
     // run main loop, target real-time simulation and 60 fps rendering
-    while( render_state ) {
+    while( render_state == 1) {
         
         if (robot->slowmotion) {
             render_time = 600.0;
@@ -35,10 +43,12 @@ int main(int argc, const char** argv)
                 mj_step(robot->m, robot->d);
         }
 
-        render_state = ur5_render(robot);
+        // render_state = ur5_render(robot);
+        render_state = mjr_render(robot);
     }
 
-    ur5_free(robot);
+    // ur5_free(robot);
+    mjr_free(robot);
 
     // terminate GLFW (crashes with Linux NVidia drivers)
     #if defined(__APPLE__) || defined(_WIN32)
