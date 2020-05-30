@@ -1,0 +1,31 @@
+<mujoco model="pendulum">  
+
+  <option timestep="0.02">
+    <flag contact="disable" energy="enable"/>
+  </option>
+
+  <worldbody>
+    <light name="light" pos="0 0 2"/>
+    <geom name="floor" size="2 2 .2" type="plane" />
+    <camera name="fixed" pos="0 -1.5 2" xyaxes='1 0 0 0 1 1'/>
+    <camera name="lookat" mode="targetbodycom" target="pole1" pos="0 -2 1"/>
+    <body name="pole1" pos="0 0 .6">
+      <joint name="hinge1" type="hinge" axis="0 1 0" damping="0.0"/>
+      <geom name="base1" type="cylinder" fromto="0 -.03 0 0 .03 0" size="0.021" mass="0"/>
+      <geom name="pole1"  type="capsule" fromto="0 0 0 0 0 0.5" size="0.02" mass="0"/>
+      <geom name="mass1" type="sphere" pos="0 0 0.5" size="0.05" mass="1"/>
+      <body name="pole2" pos="0 0 .5">
+        <joint name="hinge2" type="hinge" axis="0 1 0" damping="0.0"/>
+        <geom name="base2" type="cylinder" fromto="0 -.03 0 0 .03 0" size="0.021" mass="0"/>
+        <geom name="pole2"  type="capsule" fromto="0 0 0 0 0 0.5" size="0.02" mass="0"/>
+        <geom name="mass2" type="sphere" pos="0 0 0.5" size="0.05" mass="1"/>
+        <site type='sphere' name='EE' size='.02' pos='0.0 0.0 0.5' rgba=" .5 .1 .1 1"/>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="torque1" joint="hinge1" />
+    <motor name="torque2" joint="hinge2" />
+  </actuator>
+</mujoco>
