@@ -49,9 +49,11 @@ std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd de
     VectorXd vel_error = des_vel - qvel;
     VectorXd int_error = prev_error + pos_error;
     VectorXd command_accel = des_accel + Kp*pos_error + Ki*int_error + Kd*vel_error;
+    // std::cout << "command accel\n" << command_accel << std::endl;
 
     // Get current inertia matrix and h matrix
-    mj_forward(r->m, r->d);
+    // mj_forward(r->m, r->d);
+    mj_crb(r->m, r->d);
     MatrixXd fullM(r->m->nv, r->m->nv);
     MatrixXd h(r->m->nv, 1);
     mj_fullM(r->m, fullM.data(), r->d->qM);
@@ -313,6 +315,172 @@ VectorXd inv_dyn(mjr_t *r, VectorXd joint_accel) {
     return torque;
 }
 
+int test_joint_PID_single(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 5) {
+        printf("Error: requires 4 arguments of Kp, Ki, Kd gains, and which joint (0-nq) to test.\n");
+        return 0;
+    }
+    double Kp = std::stod(argv[1]);
+    double Ki = std::stod(argv[2]);
+    double Kv = std::stod(argv[3]);
+    int test_ind = std::stoi(argv[4]);
+    printf("Testing joint %i with gains Kp=%f, Ki=%f, Kv=%f\n", test_ind, Kp, Ki, Kv);
+    // Good gains seem to be 2, 0.0, 5
+    // Initial state is current state with zero vel and accel
+    int nq = robot->m->nq;
+    int nv = robot->m->nv;
+    VectorXd init_pos(nq);
+    VectorXd init_vel = VectorXd::Zero(nv);
+    VectorXd init_accel = VectorXd::Zero(nv);
+    mju_copy(init_pos.data(), robot->d->qpos, nq);
+    VectorXd start(nq+nv+nv);
+    start << init_pos, init_vel, init_accel;
+    std::cout << "start pos:\n" << start << "\n";
+
+    // Desired state is all joint angles zero with single joint at pi/4 with vel and accel zero
+    VectorXd des_pos = VectorXd::Zero(nq);
+    des_pos(test_ind) = M_PI / 4;
+    VectorXd end(nq+nv+nv);
+    end << des_pos, init_vel, init_accel;
+    std::cout << "end pos:\n" << end << std::endl;
+
+    double total_t = 2.0;
+    bool render_state = mjr_render(robot);
+    VectorXd int_qpos_error = VectorXd::Zero(nq);
+
+    while(robot->d->time < total_t and render_state) {
+        if (!robot->paused) {          
+
+            VectorXd des_state = poly_traj5(init_pos, des_pos, total_t , robot->d->time);
+            // VectorXd des_state;
+            // des_state = end.replicate(1, 1);
+            VectorXd torque;
+            std::tie(torque, int_qpos_error) = joint_PID(robot, des_state.head(nq), des_state.segment(nq, nv), des_state.tail(nv), int_qpos_error, Kp, Ki, Kv);
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+            mj_step(robot->m, robot->d);
+            printf("qpos: ");
+            for (int i = 0; i < nq; i++) {
+                printf("%f", robot->d->qpos[i]);
+                if (i != robot->m->nq-1) {
+                    printf(", ");
+                }
+            }
+            printf("\n");
+        }
+        render_state = mjr_render(robot);
+    }
+
+    while(render_state) {
+        render_state = mjr_render(robot);
+    }
+
+    return 1;
+}
+
+int test_joint_PID_all(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 4) {
+        printf("Error: requires 3 arguments of Kp, Ki, Kd gains.\n");
+        return 0;
+    }
+    double Kp = std::stod(argv[1]);
+    double Ki = std::stod(argv[2]);
+    double Kv = std::stod(argv[3]);
+    // Decent gains seem to be 2, 0.0, 5
+    // Initial state is current state with zero vel and accel
+    int nq = robot->m->nq;
+    int nv = robot->m->nv;
+    VectorXd init_pos(nq);
+    VectorXd init_vel = VectorXd::Zero(nv);
+    VectorXd init_accel = VectorXd::Zero(nv);
+    mju_copy(init_pos.data(), robot->d->qpos, nq);
+    VectorXd start(nq+nv+nv);
+    start << init_pos, init_vel, init_accel;
+    std::cout << "start pos:\n" << start << "\n";
+
+    // Desired state is all joint angles zero with single joint at pi/4 with vel and accel zero
+    VectorXd des_pos = VectorXd::Zero(nq);
+    for (int i = 0; i < nq; i++) {
+        des_pos(i) = M_PI / 4;
+    }
+    VectorXd end(nq+nv+nv);
+    end << des_pos, init_vel, init_accel;
+    std::cout << "end pos:\n" << end << std::endl;
+
+    double total_t = 2.0;
+    bool render_state = mjr_render(robot);
+    VectorXd int_qpos_error = VectorXd::Zero(nq);
+
+    while(robot->d->time < total_t and render_state) {
+        if (!robot->paused) {          
+
+            VectorXd des_state = poly_traj5(init_pos, des_pos, total_t , robot->d->time);
+            // VectorXd des_state;
+            // des_state = end.replicate(1, 1);
+            VectorXd torque;
+            std::tie(torque, int_qpos_error) = joint_PID(robot, des_state.head(nq), des_state.segment(nq, nv), des_state.tail(nv), int_qpos_error, Kp, Ki, Kv);
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+            mj_step(robot->m, robot->d);
+            printf("qpos: ");
+            for (int i = 0; i < robot->m->nq; i++) {
+                printf("%f", robot->d->qpos[i]);
+                if (i != robot->m->nq-1) {
+                    printf(", ");
+                }
+            }
+            printf("\n");
+        }
+        render_state = mjr_render(robot);
+    }
+
+    while(render_state) {
+        // if (!robot->paused) {  
+        //     std::tie(torque, int_qpos_error) = joint_PID(robot, des_state.head(nq), des_state.segment(nq, nv), des_state.tail(nv), int_qpos_error, Kp, Ki, Kv);
+        //     mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+        //     mj_step(robot->m, robot->d);
+        //     printf("qpos: ");
+        //     for (int i = 0; i < robot->m->nq; i++) {
+        //         printf("%f", robot->d->qpos[i]);
+        //         if (i != robot->m->nq-1) {
+        //             printf(", ");
+        //         }
+        //     }
+        //     printf("\n");
+        // }
+
+        render_state = mjr_render(robot);
+    }
+
+    return 1;
+}
+
+int inv_kin_iter_test(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 3) {
+        printf("Error: requires 2 arguments of number of iters and step size.\n");
+        return 0;
+    }
+    double num_iters = std::stod(argv[1]);
+    double damping = std::stod(argv[2]);
+
+    // for (int i = 0; i < nq; i++) {
+    //     robot->d->qpos[i] = 1;
+    // }
+    // mj_forward(robot->m, robot->d);
+
+    bool render_state = mjr_render(robot);
+    bool done = false;
+    Vector3d end_ee(-0.5, -0.5, 0.0);
+
+    while(render_state) {
+        if (!robot->paused and !done) {   
+            VectorXd final_qpos = inv_kin_iter(robot, end_ee, num_iters, 1e-5, damping);
+            mju_copy(robot->d->qpos, final_qpos.data(), robot->m->nq);
+            done = true;
+        }
+        render_state = mjr_render(robot);
+    }
+    return 1;
+}
+
 // main function
 int main(int argc, const char** argv) {
 
@@ -326,13 +494,18 @@ int main(int argc, const char** argv) {
 
     // ur5_t* robot = ur5_init();
     mjr_t* robot = mjr_init("./model/plane_arm.xml");
-    std::cout << "nu: " << robot->m->nu << "\n";
     int nq = robot->m->nq;
     int nv = robot->m->nv;
-    for (int i = 0; i < nq; i++) {
-        robot->d->qpos[i] = 1;
-    }
+    // for (int i = 0; i < nq; i++) {
+    //     robot->d->qpos[i] = 1;
+    // }
     mj_forward(robot->m, robot->d);
+
+    // test_joint_PID_single(robot, argc, argv);
+    // test_joint_PID_all(robot, argc, argv);
+    inv_kin_iter_test(robot, argc, argv);
+    return 1;
+
     int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
 
     
@@ -347,23 +520,6 @@ int main(int argc, const char** argv) {
     // VectorXd init_ee_state(9);
     // init_ee_state << ee_pos_init, init_ee_vel, init_ee_accel;
 
-    // Joint PID testing setup
-    // VectorXd init_pos(robot->m->nq);
-    // VectorXd init_vel = VectorXd::Zero(robot->m->nv);
-    // VectorXd init_accel = VectorXd::Zero(robot->m->nv);
-    // mju_copy(init_pos.data(), robot->d->qpos, robot->m->nq);
-    // VectorXd start(nq+nv+nv);
-    // start << init_pos, init_vel, init_accel;
-    // std::cout << "start pos:\n" << start << "\n";
-    // VectorXd des_pos = VectorXd::Zero(robot->m->nq);
-    // int test_ind = std::stoi(argv[4]);
-    // des_pos(test_ind) = M_PI / 4;
-    // // for (int i = 0; i < nq; i++) {
-    // //     des_pos(i) = M_PI/4;
-    // // }
-    // VectorXd end(nq+nv+nv);
-    // end << des_pos, init_vel, init_accel;
-    // std::cout << "end pos:\n" << end << std::endl;
 
     VectorXd end_ee(3);
     end_ee << -0.5, -0.5, 0.0;
@@ -414,37 +570,8 @@ int main(int argc, const char** argv) {
         //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
         //  this loop will finish on time for the next frame to be rendered at 60 fps.
         //  Otherwise add a cpu timer and exit this loop when it is time to render.
-        if (!robot->paused) {
-            // SIMULATION WITH NO CONTROL
-            // mjtNum simstart = robot->d->time;
-            // while( robot->d->time - simstart < 1.0/render_time )
-                // mj_step(robot->m, robot->d);            
+        if (!robot->paused) {         
 
-            // Inverse kinematics test
-            VectorXd final_qpos = inv_kin_iter(robot, end_ee, Kp, 1e-5, Kv);
-            mju_copy(robot->d->qpos, final_qpos.data(), robot->m->nq);
-            total_t = -1.0;
-
-            // Test single joint with PD controller
-            // VectorXd des_state = poly_traj5(start, end, total_t , robot->d->time);
-            // VectorXd des_state;
-            // des_state = end.replicate(1, 1);
-            // VectorXd des_pos = VectorXd::Zero(robot->m->nq);
-            // des_pos(1) = M_PI / 2.0;
-            // VectorXd des_vel = VectorXd::Zero(robot->m->nv);
-            // VectorXd des_accel = VectorXd::Zero(robot->m->nv);
-            // VectorXd torque;
-            // std::tie(torque, int_qpos_error) = joint_PID(robot, des_state.head(robot->m->nq), des_state.segment(robot->m->nq, robot->m->nv), des_state.tail(robot->m->nv), int_qpos_error, Kp, Ki, Kv);
-            // mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
-            // mj_step(robot->m, robot->d);
-            // printf("qpos: ");
-            // for (int i = 0; i < robot->m->nq; i++) {
-            //     printf("%f", robot->d->qpos[i]);
-            //     if (i != robot->m->nq-1) {
-            //         printf(", ");
-            //     }
-            // }
-            // printf("\n");
 
             // Taskspace inverse kinematics
             // Vector3d desired_state(2.0, 0.0, 0.0);
