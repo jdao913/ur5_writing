@@ -22,6 +22,7 @@ all: sim control
 # Normal targets
 clean:
 	rm -f ./sim
+	rm -f ./control
 
 sim: 
 	$(CC) $(INC) $(CFLAGS) sim.cpp mj_robot.cpp $(LIBS) -o sim
