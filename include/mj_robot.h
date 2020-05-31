@@ -51,6 +51,7 @@ mjr_t *mjr_init(const char* modelfile);
 void mjr_free(mjr_t* r);
 
 bool mjr_render(mjr_t *r);
+void mjr_close_render(mjr_t *r);
 
 // GLFW Callbacks
 void keyboard(GLFWwindow* window, int key, int scancode, int act, int mods);

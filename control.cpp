@@ -13,6 +13,8 @@
 #include <vector>
 #include <tuple>
 #include <math.h>
+#include <fstream>
+#include <sstream>
 
 using namespace Eigen;
 
@@ -30,33 +32,29 @@ VectorXd poly_traj5(VectorXd start, VectorXd end, double total_t, double curr_t)
     VectorXd pos = start + (10/pow(total_t,3)*pow(curr_t,3) - 15/pow(total_t,4)*pow(curr_t,4) + 6/pow(total_t,5)*pow(curr_t,5)) * state_diff;
     VectorXd vel = (30/pow(total_t,3)*pow(curr_t,2) - 60/pow(total_t,4)*pow(curr_t,3) + 30/pow(total_t,5)*pow(curr_t,4)) * state_diff;
     VectorXd accel = (60/pow(total_t,3)*curr_t - 180/pow(total_t,4)*pow(curr_t,2) + 120/pow(total_t,5)*pow(curr_t,3)) * state_diff;
-    // Vector3d desired_state(pos, vel, accel);
     VectorXd desired_state(start.size()*3);
     desired_state << pos, vel, accel;
     return desired_state;
 
 }
 
-// Returns torques for the desired position and velocity and inputted Kp and Kd gains using a simple PD controller
-std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd des_vel, VectorXd des_accel, VectorXd prev_error, double Kp, double Ki, double Kd) {
+// Joint PID controller. Takes in a mjr_t robot, desired position, velocity, and acceleration, along with PID gains and a sum of 
+// previous position error. Returns the computed torque and current integrated position error.
+std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd des_vel, VectorXd des_accel, VectorXd prev_error, 
+                                        double Kp, double Ki, double Kd) {
     // Get current joint position and velocity
     VectorXd qpos(r->m->nq);
     VectorXd qvel(r->m->nv);
     mju_copy(qpos.data(), r->d->qpos, r->m->nq);
     mju_copy(qvel.data(), r->d->qvel, r->m->nv);
-    // std::cout << "des pos\n" << des_pos << std::endl;
-    // std::cout << "des vel\n" << des_vel << std::endl;
-    // std::cout << "des accel\n" << des_accel << std::endl;
 
     // Compute commanded joint acceleration
     VectorXd pos_error = des_pos - qpos;
     VectorXd vel_error = des_vel - qvel;
     VectorXd int_error = prev_error + pos_error;
     VectorXd command_accel = des_accel + Kp*pos_error + Ki*int_error + Kd*vel_error;
-    // std::cout << "command accel\n" << command_accel << std::endl;
 
     // Get current inertia matrix and h matrix
-    // mj_forward(r->m, r->d);
     mj_crb(r->m, r->d);
     MatrixXd_rowMaj fullM(r->m->nv, r->m->nv);
     MatrixXd_rowMaj h(r->m->nv, 1);
@@ -71,7 +69,7 @@ std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd de
 
 // Given a desired taskspace position, uses inverse kinematics to find the corresponding joint position
 // then using a PD controller with the inputted gains, returns the corresponding torque
-VectorXd inv_kin(mjr_t *r, Vector3d des_pos, Vector3d des_vel, double Kp, double Kd) {
+VectorXd inv_kin_control(mjr_t *r, Vector3d des_pos, Vector3d des_vel, double Kp, double Kd) {
     // dx = x_des - x_curr;
     // dq = Jp_inv * dx;
     // torque = kp * dq + kd * (-qvel);
@@ -104,25 +102,16 @@ VectorXd inv_kin(mjr_t *r, Vector3d des_pos, Vector3d des_vel, double Kp, double
     // VectorXd torque = Kp*q_error + Kd*(-qvel);
     std::cout << "Jp*qvel: " << (Jp*qvel).format(CommaInitFmt) << std::endl;
     std::cout << "ee_vel: " << ee_vel.format(CommaInitFmt) << std::endl;
-    VectorXd command_accel = Kp*q_error + Kd*(-qvel);
-
-    // Get current inertia matrix and h matrix
-   
-    // MatrixXd_rowMaj fullM(r->m->nv, r->m->nv);
-    // MatrixXd_rowMaj h(r->m->nv, 1);
-    // mj_fullM(r->m, fullM.data(), r->d->qM);
-    // mj_rne(r->m, r->d, 1, h.data());
-
-    // Compute torques from acceleration
-    // VectorXd torque = fullM*command_accel + h;
-    VectorXd torque = command_accel;
+    VectorXd torque = Kp*q_error + Kd*(-qvel);
 
     return torque;
 }
 
-// Given a desired taskspace position, uses inverse kinematics to find the corresponding joint position
-VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double damping) {
-    // Make copy of mjData for Jacobian computations
+// Given a desired taskspace position, uses inverse kinematics to find the corresponding joint position.
+// Uses simple iterative Jacobian transpose method. Takes in as input a desired taskspace position, the maximum
+// number of iterations to run, a step size, and a mjr robot to run on. Returns a vector containing the computed joint postions
+VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double step_size) {
+    // Make copy of mjData for Jacobian computations and joint position updates
     mjData* d_copy = mj_makeData(r->m);
     mj_copyData(d_copy, r->m, r->d);
     Vector3d ee_pos;
@@ -131,34 +120,27 @@ VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double 
     MatrixXd_rowMaj Jp(3, r->m->nv);       // position Jacobian
     MatrixXd_rowMaj Jr(3, r->m->nv);       // rotation Jacobian
     for (int k = 0; k < iters; k++) {
-        mj_forward(r->m, d_copy);
-        mju_copy(ee_pos.data(), &d_copy->xpos[3*ee_id], 3);
-        std::cout << "ee pos\n" << ee_pos << std::endl;
         // Get current end-effector Jacobian
+        mj_forward(r->m, d_copy);
         mj_jacBody(r->m, d_copy, Jp.data(), Jr.data(), ee_id);
 
-        // Compute Jacobian inverse
-        CompleteOrthogonalDecomposition<MatrixXd_rowMaj> cod(Jp);
-        MatrixXd_rowMaj Jp_pinv = cod.pseudoInverse();
-
-        std::cout << "Jp pinv\n" << Jp_pinv << std::endl;
-
+        // Compute task and joint space position error
+        mju_copy(ee_pos.data(), &d_copy->xpos[3*ee_id], 3);
         VectorXd task_pos_error = des_pos - ee_pos;
-        // VectorXd q_error = Jp_pinv * task_pos_error;
         VectorXd q_error = Jp.transpose() * task_pos_error;
+
+        // Update joint positions with error and step size
         for (int i = 0; i < r->m->nq; i++) {
-            d_copy->qpos[i] += damping*q_error(i);
+            d_copy->qpos[i] += step_size*q_error(i);
         }
         printf("iter %i\t ee pos error: %f\n", k, task_pos_error.norm());
-        if (task_pos_error.norm() < tol) {
+        if (task_pos_error.norm() < tol) {      // Stop if already within tolerance
             break;
         }
     }
-    // std::cout << "qvel: " << qvel.format(CommaInitFmt) << std::endl;
-    // std::cout << "Jaco qvel: " << (Jp_pinv*ee_vel).format(CommaInitFmt) << std::endl;
 
+    // Output final computed joint position
     VectorXd final_qpos(r->m->nq);
-    // Set real qpos to final computed joint position
     for (int i = 0; i < r->m->nq; i++) {
         final_qpos(i) = d_copy->qpos[i];
     }
@@ -166,6 +148,7 @@ VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double 
     return final_qpos;
 }
 
+// Computes torques using taskspace inverse dynamics
 std::tuple<VectorXd, VectorXd, MatrixXd_rowMaj> get_torques(mjr_t *r, VectorXd desired_state, VectorXd prev_vel_error, MatrixXd_rowMaj prev_J, double Kp, double Ki, double Kd) {
     // Get current jointspace inertia matrix
     mj_crb(r->m, r->d);      // Call mj_crb first to compute qM
@@ -260,21 +243,18 @@ MatrixXd_rowMaj get_task_accel_PID(mjr_t *r, VectorXd desired_state, VectorXd pr
     int ee_id = mj_name2id(r->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
     mj_comVel(r->m, r->d);
     mju_copy(ee_pos.data(), &r->d->xpos[3*ee_id], 3);
-    mju_copy(ee_vel.data(), &r->d->cvel[6*ee_id], 3);
-    // vel_command = Kv*(x - y) + dx
-    // std::cout << "desired task pos:\n" << desired_state.head(3) << std::endl;
-    // std::cout << "desired task vel:\n" << desired_state.segment(3, 3) << std::endl;
-    // std::cout << "desired task accel:\n" << desired_state.tail(3) << std::endl;
+    mju_copy(ee_vel.data(), &r->d->cvel[6*ee_id + 3], 3);
+
     VectorXd d_error = (desired_state.segment(3, 3) - ee_vel);
     VectorXd pos_error = (desired_state.head(3) - ee_pos);
-    std::cout << "pos_error\n" << pos_error << std::endl;
     VectorXd int_error = (prev_pos_error + pos_error);
-    // Acc Command = kp*(vel_command - dy) + Kp*Ki*int vel error + ddx
-    VectorXd acc_command = desired_state.tail(3) + Kp*pos_error + Kv*d_error;
+    // std::cout << "pos error: " << pos_error.format(CommaInitFmt) << std::endl;
+    // std::cout << "prev pos error: " << prev_pos_error.format(CommaInitFmt) << std::endl;
+    // std::cout << "int  pos error: " << int_error.format(CommaInitFmt) << std::endl;
+    VectorXd acc_command = desired_state.tail(3) + Kp*pos_error + Ki*int_error + Kv*d_error;
     Matrix<double, 3, 2> output;
     output << acc_command, int_error;
-    // std::cout << "int vel error:\n" << int_vel_error << std::endl;
-    std::cout << "acc command in func:\n" << acc_command << std::endl;
+
     return output;
 
 }
@@ -493,7 +473,7 @@ int test_taskspace_inv_kin(mjr_t* robot, int argc, const char** argv) {
     mju_copy(ee_pos_init.data(), &robot->d->site_xpos[3*ee_id], 3);
     VectorXd end_ee(3);
     // end_ee << 0.0, 0.0, 1.6;
-    end_ee << 0.0, 1.0, 0.0;
+    end_ee << 0.0, 0.0, 1.5;
     std::cout << "init ee pos: " << ee_pos_init.format(CommaInitFmt) << std::endl;
     std::cout << "desired ee pos: " << end_ee.format(CommaInitFmt) << std::endl;
 
@@ -507,7 +487,7 @@ int test_taskspace_inv_kin(mjr_t* robot, int argc, const char** argv) {
             // Vector3d des_state(-0.6, 0.0, 0.0);
             // VectorXd des_state = poly_traj5(ee_pos_init, end_ee, total_t, robot->d->time);
             // std::cout << "Des state\n" << des_state << std::endl;
-            VectorXd torque = inv_kin(robot, end_ee, Vector3d::Zero(3), Kp, Kv);
+            VectorXd torque = inv_kin_control(robot, end_ee, Vector3d::Zero(3), Kp, Kv);
             // VectorXd torque = inv_kin(robot, end_ee, Vector3d::Zero(3), Kp, Kv);
             mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
             std::cout << "torque" << torque << std::endl;
@@ -612,30 +592,39 @@ int test_taskspace_accel(mjr_t* robot, int argc, const char** argv) {
     std::cout << "init ee pos: " << ee_pos_init.format(CommaInitFmt) << std::endl;
     std::cout << "desired ee pos: " << end_ee.format(CommaInitFmt) << std::endl;
 
-    double total_t = 2.0;
+    double total_t = 3.0;
     Vector3d int_vel_error = Vector3d::Zero(3);
      // Get current end-effector Jacobian
     MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
     MatrixXd_rowMaj Jr(3, robot->m->nv);       // rotation Jacobian
     mj_jacBody(robot->m, robot->d, prev_Jp.data(), Jr.data(), ee_id);
     bool render_state = mjr_render(robot);
-    VectorXd int_qpos_error = VectorXd::Zero(nq);
+
+    Vector3d traj_start(-.5, 0, 0);
+    Vector3d traj_vel(-.2, 0, 0);
 
     while(robot->d->time < total_t and render_state) {
         if (!robot->paused) {          
-
-            // VectorXd desired_state = poly_traj5(ee_pos_init, end_ee, total_t , robot->d->time);
+            Vector3d desired_pos = traj_start + robot->d->time*traj_vel;
+            // Vector3d desired_pos(-.5, 0.0, 0);
             VectorXd desired_state(9);
-            desired_state << -0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
-            std::cout << "desired state: " << desired_state.format(CommaInitFmt) << std::endl;
-            VectorXd torque, new_int_vel_error;
-            MatrixXd_rowMaj new_Jp;
-            std::tie(torque, new_int_vel_error, new_Jp) = get_torques(robot, desired_state, int_vel_error, prev_Jp, Kp, Ki, Kv);
-            prev_Jp = new_Jp.replicate(1,1);
-            int_vel_error = new_int_vel_error.replicate(1, 1);
+            desired_state << desired_pos, traj_vel, Vector3d::Zero(3);
+            std::cout << "desired state:\n" << desired_state.format(CommaInitFmt) << std::endl;
+            // MatrixXd task_accel = get_task_accel(robot, desired_state, int_vel_error, Kv, Kp, Ki);
+            MatrixXd task_accel = get_task_accel_PID(robot, desired_state, int_vel_error, Kv, Kp, Ki);
+            std::cout << "task accel col 1" << task_accel.col(1).format(CommaInitFmt) << std::endl;
+            int_vel_error += task_accel.col(1);
+            // printf("got task accel\n");
+            auto [joint_accel, curr_Jp] = task2joint_accel(robot, task_accel.col(0), prev_Jp);
+            // printf("converted to joint accel\n");
+            VectorXd torque = inv_dyn(robot, joint_accel);
+            // std::cout << "torque\n" << torque << std::endl;
             mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+
             mj_step(robot->m, robot->d);
-            // std::cout << "torques: \n" << torque << "\n";
+            prev_Jp = curr_Jp.replicate(1,1);
+            // std::cout << "prev Jp\n" << prev_Jp << std::endl;
+            // std::cout << "curr Jp\n" << curr_Jp << std::endl;
             printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
         }
         render_state = mjr_render(robot);
@@ -647,6 +636,197 @@ int test_taskspace_accel(mjr_t* robot, int argc, const char** argv) {
 
     return 1;
 }
+
+int letter_test(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 4) {
+        printf("Error: requires 2 arguments of Kp, Ki, Kv gains.\n");
+        return 0;
+    }
+    double Kp = std::stod(argv[1]);
+    double Ki = std::stod(argv[2]);
+    double Kv = std::stod(argv[3]);
+    bool debug = false;
+    bool viz = false;
+    bool save_data = true;
+    FILE *fp = fopen("./letter_test.csv", "w+");
+
+    int nq = robot->m->nq;
+    int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
+
+    for (int i = 0; i < nq; i++) {
+        robot->d->qpos[i] = 1.5;
+    }
+    robot->d->qpos[3] = 1.0;
+    robot->d->qpos[4] = 1.2;
+    mj_forward(robot->m, robot->d);
+     // Get current end-effector Jacobian
+    MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
+    mj_jacBody(robot->m, robot->d, prev_Jp.data(), NULL, ee_id);
+    bool render_state = true;
+    if (viz) {
+        render_state = mjr_render(robot);
+    } else{
+        mjr_close_render(robot);
+    }
+    Vector3d int_pos_error = Vector3d::Zero(3);
+
+    
+    std::ifstream letter_file("./trajectory_gen/cap_a_traj.csv");
+    if (!letter_file.is_open()) throw std::runtime_error("Could not open file");
+
+    std::string line, col_value;
+    // std::getline(letter_file, line);
+    // std::stringstream init_ss(line);
+    // while (std::getline(init_ss, col_value, ',')) {
+    //     printf("%f ", std::stod(col_value));
+    // }
+    // printf("\n");
+    // std::getline(letter_file, line);
+    // std::stringstream next_ss(line);
+    // while (std::getline(next_ss, col_value, ',')) {
+    //     printf("%f ", std::stod(col_value));
+    // }
+    // printf("\n");
+    // return 1;
+    
+    // Give robot total_t to reach first desired state
+    float total_t = 4.0;
+    std::getline(letter_file, line);    // Read next line of traj file 
+    // Extract desired state from string
+    std::stringstream init_ss(line);
+    VectorXd desired_state(9);
+    for (int i = 0; i < 3; i++) {
+        std::getline(init_ss, col_value, ',');
+        desired_state(i) = std::stod(col_value);
+        std::getline(init_ss, col_value, ',');
+        desired_state(i+1) = std::stod(col_value);
+        desired_state(i+2) = 0.0;
+    }
+    int int_count = 0;
+    int int_max = 20;
+    int save_count = 0;
+    
+    while(robot->d->time < total_t and render_state) {
+        if (!robot->paused || !viz) {        
+            if (int_count >= int_max) {
+                int_count = 0;
+                int_pos_error = Vector3d::Zero(3);
+            }
+            
+            // MatrixXd task_accel = get_task_accel(robot, desired_state, int_vel_error, Kv, Kp, Ki);
+            MatrixXd task_accel = get_task_accel_PID(robot, desired_state, int_pos_error, Kv, Kp, Ki);
+            int_pos_error = task_accel.col(1);
+            // std::cout << "int pos error" << int_pos_error.format(CommaInitFmt) << std::endl;
+            // printf("got task accel\n");
+            auto [joint_accel, curr_Jp] = task2joint_accel(robot, task_accel.col(0), prev_Jp);
+            // printf("converted to joint accel\n");
+            VectorXd torque = inv_dyn(robot, joint_accel);
+            // std::cout << "torque\n" << torque << std::endl;
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+
+            mj_step(robot->m, robot->d);
+            prev_Jp = curr_Jp.replicate(1,1);
+            // std::cout << "prev Jp\n" << prev_Jp << std::endl;
+            // std::cout << "curr Jp\n" << curr_Jp << std::endl;
+            if (debug) {
+                std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+                printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+            }
+            int_count += 1;
+        }
+        if (viz) {
+            render_state = mjr_render(robot);
+        }
+    }
+
+    int_pos_error = Vector3d::Zero(3);
+    int step_count = 60;     // How many steps to take before updating desired state
+    int curr_step = 0;
+    // Kp += 20;
+    // Ki = 0.1;
+    // Kv -= 2;
+    int_max = 100;
+    fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    while(!letter_file.eof() and render_state) {
+        if (!robot->paused || !viz) {   
+            if (int_count >= int_max) {
+                int_count = 0;
+                int_pos_error = Vector3d::Zero(3);
+            }
+
+            if (curr_step == step_count) { 
+                if (letter_file.eof()) {
+                    break;
+                }
+                std::getline(letter_file, line);    // Read next line of traj file 
+                // Extract desired state from string
+                std::stringstream ss(line);
+                // desired_state = Vector3d::Zero(6);
+                // std::cout << "line: " << line << std::endl;
+                for (int i = 0; i < 2; i++) {
+                    std::getline(ss, col_value, ',');
+                    // std::cout << "col value: " << col_value << std::endl;
+                    desired_state(i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
+                    // desired_state(3*i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
+                    // std::getline(ss, col_value, ',');
+                    // desired_state(3*i+1) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
+                    // desired_state(3*i+2) = 0.0;
+                }
+                curr_step = 0;
+                if (save_data) {
+                    fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                    save_count += 1;
+                    if (save_count % 50 == 0) {
+                        printf("Saved %i states\n", save_count);
+                        printf("sim time: %f", robot->d->time);
+                    }
+                }
+            }
+            
+            // MatrixXd task_accel = get_task_accel(robot, desired_state, int_vel_error, Kv, Kp, Ki);
+            MatrixXd task_accel = get_task_accel_PID(robot, desired_state, int_pos_error, Kv, Kp, Ki);
+            int_pos_error = task_accel.col(1);
+            // printf("got task accel\n");
+            auto [joint_accel, curr_Jp] = task2joint_accel(robot, task_accel.col(0), prev_Jp);
+            // printf("converted to joint accel\n");
+            VectorXd torque = inv_dyn(robot, joint_accel);
+            // std::cout << "torque\n" << torque << std::endl;
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+
+            mj_step(robot->m, robot->d);
+            prev_Jp = curr_Jp.replicate(1,1);
+            // std::cout << "prev Jp\n" << prev_Jp << std::endl;
+            // std::cout << "curr Jp\n" << curr_Jp << std::endl;
+            if (debug) {
+                std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+                printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                printf("sim time: %f", robot->d->time);
+            }
+            curr_step += 1;
+            int_count += 1;
+        }
+        if (viz) {
+            render_state = mjr_render(robot);
+        }
+    }
+    printf("sim time: %f", robot->d->time);
+
+    // while (std::getline(letter_file, line)) {
+    //     std::stringstream ss(line);
+    //     VectorXd desired_state(6);
+    //     for (int i = 0; i < 6; i++) {
+    //         std::getline(ss, col_value, ',');
+    //         desired_state(i) = std::stod(col_value);
+    //         // printf("%f ", std::stod(col_value));
+    //     }
+    //     std::cout << desired_state << std::endl;
+    //     // return 1;
+
+    // }
+    return 1;
+
+}
+
 
 // main function
 int main(int argc, const char** argv) {
@@ -660,126 +840,16 @@ int main(int argc, const char** argv) {
         mju_error("Could not initialize GLFW");
 
     // ur5_t* robot = ur5_init();
-    mjr_t* robot = mjr_init("./model/pendulum2.xml");
-    int nq = robot->m->nq;
-    int nv = robot->m->nv;
-    // for (int i = 0; i < nq; i++) {
-    //     robot->d->qpos[i] = 1;
-    // }
-    mj_forward(robot->m, robot->d);
+    mjr_t* robot = mjr_init("./model/plane_arm_big.xml");
 
     // test_joint_PID_single(robot, argc, argv);
     // test_joint_PID_all(robot, argc, argv);
     // inv_kin_iter_test(robot, argc, argv);
-    test_taskspace_inv_kin(robot, argc, argv);
+    // test_taskspace_inv_kin(robot, argc, argv);
     // test_taskspace_inv_dyn(robot, argc, argv);
-    return 1;
-
-    int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
-
-    
-
-    printf("nq: %i\t nv: %i\n", nq, nv);
-
-    VectorXd ee_pos_init(3);
-    mju_copy(ee_pos_init.data(), &robot->d->xpos[3*ee_id], 3);
-    std::cout << "init ee pos\n" << ee_pos_init << std::endl;
-    // VectorXd init_ee_vel = VectorXd::Zero(3);
-    // VectorXd init_ee_accel = VectorXd::Zero(3);
-    // VectorXd init_ee_state(9);
-    // init_ee_state << ee_pos_init, init_ee_vel, init_ee_accel;
-
-
-    VectorXd end_ee(3);
-    end_ee << -0.5, -0.5, 0.0;
-    // VectorXd end_ee_state(9);
-    // end_ee_state << end_ee, init_ee_vel, init_ee_accel;
-    double total_t = 20.0;
-    // double curr_t = .2;
-    // VectorXd desired_state = poly_traj5(start, end, total_t , curr_t);
-    // std::cout << desired_state << "\n";
-
-    // MatrixXd_rowMaj torque = get_torques(robot, desired_state);
-    // std::cout << torque << "\n";
-    // Vector3d int_vel_error = Vector3d::Zero(3);
-    // MatrixXd_rowMaj accel = get_task_accel(robot, desired_state, int_vel_error, 1.0, 1.0, 1.0);
-    // std::cout << "task accel output:\n" << accel << std::endl;
-    // std::cout << "task accel:\n" << accel.col(0) << std::endl;
-    // VectorXd joint_accel = task2joint_accel(robot, accel.col(0));
-    // std::cout << "joint accel:\n" << joint_accel << std::endl;
-    // VectorXd torque = inv_dyn(robot, joint_accel);
-    // std::cout << "torque:\n" << torque << std::endl;
-
-    Vector3d traj_start = ee_pos_init.replicate(1, 1);
-    Vector3d traj_vel(-0.1, 0.0, 0.0);
-    Vector3d int_vel_error = Vector3d::Zero(3);
-    VectorXd int_qpos_error = VectorXd::Zero(nq);
-    // double Kp = 0.02;
-    // double Ki = 0.0;
-    // double Kv = 0.01;
-    double Kp = std::stod(argv[1]);
-    double Ki = std::stod(argv[2]);
-    double Kv = std::stod(argv[3]);
-    // printf("gains: Kp=%f\tKi=%f\tKv=%f\n", Kp, Ki, Kv);
-    // Get inital Jacobian for Jdot later
-    // Get current end-effector Jacobian
-    MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
-    MatrixXd_rowMaj Jr(3, robot->m->nv);       // rotation Jacobian
-    mj_jacBody(robot->m, robot->d, prev_Jp.data(), Jr.data(), ee_id);
-    // std::cout << "init J:\n" << prev_Jp << std::endl;
- 
-    // bool render_state = ur5_render(robot);
-    bool render_state = mjr_render(robot);
-    double render_time = 60.0;
-    // run main loop, target real-time simulation and 60 fps rendering
-    double clear_time = 0.0;
-    while(robot->d->time < total_t and render_state) {
-        
-        // advance interactive simulation for 1/60 sec
-        //  Assuming MuJoCo can simulate faster than real-time, which it usually can,
-        //  this loop will finish on time for the next frame to be rendered at 60 fps.
-        //  Otherwise add a cpu timer and exit this loop when it is time to render.
-        if (!robot->paused) {         
-
-            // TASKSPACE ACCELERATION -> JOINTSPACE INVERSE DYNAMICS METHOD
-            // Vector3d desired_pos = traj_start + robot->d->time*traj_vel;
-            // Vector3d desired_pos(-.5, -.5, 0);
-            // Matrix<double, 9, 1> desired_state;
-            // desired_state << desired_pos, Vector3d::Zero(3), Vector3d::Zero(3);
-            // std::cout << "desired state:\n" << desired_state << std::endl;
-            // // MatrixXd task_accel = get_task_accel(robot, desired_state, int_vel_error, Kv, Kp, Ki);
-            // MatrixXd task_accel = get_task_accel_PID(robot, desired_state, int_vel_error, Kv, Kp, Ki);
-            // int_vel_error += task_accel.col(1);
-            // // printf("got task accel\n");
-            // std::cout << "accel command\n" << task_accel.col(0) << std::endl;
-            // auto [joint_accel, curr_Jp] = task2joint_accel(robot, task_accel.col(0), prev_Jp);
-            // // printf("converted to joint accel\n");
-            // VectorXd torque = -inv_dyn(robot, joint_accel);
-            // mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
-            // // mju_copy(robot->d->qacc, joint_accel.data(), robot->m->nv);
-
-            // mj_step(robot->m, robot->d);
-            // prev_Jp = curr_Jp.replicate(1,1);
-            // // std::cout << "prev Jp\n" << prev_Jp << std::endl;
-            // // std::cout << "curr Jp\n" << curr_Jp << std::endl;
-            // printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
-        }
-
-        // render_state = ur5_render(robot);
-        render_state = mjr_render(robot);
-    }
-
-    while (render_state) {
-    //     if (!robot->paused) {
-    //         VectorXd torque = inv_kin(robot, end_ee, Vector3d::Zero(3), Kp, Kv);
-    //         mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
-    //         mj_step(robot->m, robot->d);
-    //         printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
-    //     }
-        render_state = mjr_render(robot);
-    }
-    // ur5_free(robot);
+    // test_taskspace_accel(robot, argc, argv);
+    letter_test(robot, argc, argv);
     mjr_free(robot);
-
+ 
     return 1;
 }

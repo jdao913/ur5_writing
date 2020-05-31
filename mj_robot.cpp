@@ -449,6 +449,10 @@ void mjr_free(mjr_t* r) {
 
 }
 
+void mjr_close_render(mjr_t *r) {
+    glfwDestroyWindow(r->window);
+}
+
 bool mjr_render(mjr_t *r) {
     // Return early if window is closed
     if (!r || !r->window)

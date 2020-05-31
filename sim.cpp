@@ -20,7 +20,8 @@ int main(int argc, const char** argv)
         mju_error("Could not initialize GLFW");
 
     // ur5_t* robot = ur5_init();
-    mjr_t* robot = mjr_init("./model/ur5.xml");
+    mjr_t* robot = mjr_init("./model/plane_arm_big.xml");
+    int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
 
     // bool render_state = ur5_render(robot);
     bool render_state = mjr_render(robot);
@@ -39,8 +40,10 @@ int main(int argc, const char** argv)
         //  Otherwise add a cpu timer and exit this loop when it is time to render.
         if (!robot->paused) {
             mjtNum simstart = robot->d->time;
-            while( robot->d->time - simstart < 1.0/render_time )
+            while( robot->d->time - simstart < 1.0/render_time ) {
                 mj_step(robot->m, robot->d);
+            }
+            printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
         }
 
         // render_state = ur5_render(robot);
