@@ -646,8 +646,8 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
     double Ki = std::stod(argv[2]);
     double Kv = std::stod(argv[3]);
     bool debug = false;
-    bool viz = false;
-    bool save_data = true;
+    bool viz = true;
+    bool save_data = false;
     FILE *fp = fopen("./letter_test.csv", "w+");
 
     int nq = robot->m->nq;
@@ -705,6 +705,8 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
     int int_count = 0;
     int int_max = 20;
     int save_count = 0;
+    int vis_count = 100;
+    int curr_vis = 0;
     
     while(robot->d->time < total_t and render_state) {
         if (!robot->paused || !viz) {        
@@ -733,10 +735,13 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
                 printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
             }
             int_count += 1;
-        }
+            curr_vis += 1;
+            
+        } 
         if (viz) {
             render_state = mjr_render(robot);
         }
+        
     }
 
     int_pos_error = Vector3d::Zero(3);
@@ -746,7 +751,10 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
     // Ki = 0.1;
     // Kv -= 2;
     int_max = 100;
-    fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    curr_vis = 0;
+    if (save_data) {
+        fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    }
     while(!letter_file.eof() and render_state) {
         if (!robot->paused || !viz) {   
             if (int_count >= int_max) {
@@ -778,7 +786,7 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
                     save_count += 1;
                     if (save_count % 50 == 0) {
                         printf("Saved %i states\n", save_count);
-                        printf("sim time: %f", robot->d->time);
+                        printf("sim time: %f\n", robot->d->time);
                     }
                 }
             }
@@ -804,9 +812,15 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
             }
             curr_step += 1;
             int_count += 1;
-        }
-        if (viz) {
-            render_state = mjr_render(robot);
+            curr_vis += 1;
+            if (curr_vis >= vis_count) {
+                render_state = mjr_render(robot);
+                curr_vis = 0;
+            }
+        } else {
+            if (viz) {
+                render_state = mjr_render(robot);
+            }
         }
     }
     printf("sim time: %f", robot->d->time);
