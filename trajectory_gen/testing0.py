@@ -4,7 +4,7 @@ import matplotlib.animation as animation
 import get_letter_traj
 from scipy.interpolate import interp1d
 
-timestep = 0.01
+timestep = 1
 
 def get_vel_accel(xd,yd,l):
 
@@ -105,12 +105,12 @@ def traj_gen(input_str):
         else:
             xd, yd, l = get_letter_traj.get_traj(letter)
 
-            xd = [x + x_offset + 0.5 for x in xd]
+            xd = [x + x_offset + 0.1 for x in xd]
             yd = [y + y_offset for y in yd]
 
             # interpolate betwen end and new start
             start_x = xd[0]
-            xdnew = np.linspace(last_value_x,start_x,num=20, endpoint = False)
+            xdnew = np.linspace(last_value_x,start_x,num=100, endpoint = False)
             x = np.array([penum_value_x,last_value_x,start_x,xd[1]])
             y = np.array([penum_value_y,last_value_y,yd[0],yd[1]])
             get_ydnew = interp1d(x,y,kind='cubic')
@@ -120,6 +120,10 @@ def traj_gen(input_str):
             xdnew = list(xdnew)
             ydnew = list(ydnew)
 
+            #for i in range(1,len(ydnew)-1):
+            #    print(ydnew[i])
+            #    ydnew[i] = (ydnew[i-1] + ydnew[i])/2
+            #    print(ydnew[i])
             l_new = len(xdnew)
 
             to_append = np.zeros((l_new,6))
@@ -148,7 +152,7 @@ def traj_gen(input_str):
     print(trajectory.shape)
     print('hi')
 
-    np.savetxt("hello_traj_cubic_spline.csv", trajectory, delimiter=",")
+    np.savetxt("hello_traj_new_small.csv", trajectory, delimiter=",")
     return trajectory
 
 trajectory = traj_gen('Hello')
