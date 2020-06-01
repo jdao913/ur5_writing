@@ -54,7 +54,7 @@ def get_traj(letter):
         xd,yd = get_x_y('capital_letters_csvs/e_cap.csv')
         len_traj = len(xd)
     elif letter == 'G':
-        xd,yd = get_x_y('capital_letters_csvs/e_cap.csv')
+        xd,yd = get_x_y('capital_letters_csvs/g_cap.csv')
         len_traj = len(xd)
     elif letter == 'H':
         xd,yd = get_x_y('capital_letters_csvs/h_cap.csv')
@@ -94,6 +94,9 @@ def get_traj(letter):
         len_traj = len(xd)
     elif letter == 'T':
         xd,yd = get_x_y('capital_letters_csvs/t_cap.csv')
+        len_traj = len(xd)
+        xd = xd[0:len_traj-20]
+        yd = yd[0:len_traj-20]
         len_traj = len(xd)
     elif letter == 'U':
         xd,yd = get_x_y('capital_letters_csvs/u_cap.csv')
