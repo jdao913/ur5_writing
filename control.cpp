@@ -47,6 +47,7 @@ std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd de
     VectorXd qvel(r->m->nv);
     mju_copy(qpos.data(), r->d->qpos, r->m->nq);
     mju_copy(qvel.data(), r->d->qvel, r->m->nv);
+    // std::cout << "qpos: " << qpos.format(CommaInitFmt) << std::endl;
 
     // Compute commanded joint acceleration
     VectorXd pos_error = des_pos - qpos;
@@ -133,7 +134,7 @@ VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double 
         for (int i = 0; i < r->m->nq; i++) {
             d_copy->qpos[i] += step_size*q_error(i);
         }
-        printf("iter %i\t ee pos error: %f\n", k, task_pos_error.norm());
+        // printf("iter %i\t ee pos error: %f\n", k, task_pos_error.norm());
         if (task_pos_error.norm() < tol) {      // Stop if already within tolerance
             break;
         }
@@ -145,7 +146,26 @@ VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double 
         final_qpos(i) = d_copy->qpos[i];
     }
 
+    mj_deleteData(d_copy);
+
     return final_qpos;
+}
+
+// Given a desired taskspace state, returns torques. Computes torques by using inverse kinematics to transform 
+// desired taskspace state into desired jointspace state and then does a PID controller to get desired joint 
+// acceleration command, then does inverse dynamics to get torque. Returns torque and updated integrated position error.
+std::tuple<VectorXd, VectorXd> IK_joint_PID(mjr_t *r, Vector3d desired_state, VectorXd prev_pos_error, double Kp, double Ki, double Kd) {
+    VectorXd des_joint = inv_kin_iter(r, desired_state, 200, 1e-5, .7);
+    // std::cout << "des joint: " << des_joint.format(CommaInitFmt) << std::endl;
+    // printf("finished IK\n");
+    VectorXd torque, new_int_error;
+    VectorXd zero_vel = VectorXd::Zero(r->m->nv);
+    // printf("finished declare\n");
+    std::tie(torque, new_int_error) = joint_PID(r, des_joint, zero_vel, zero_vel, prev_pos_error, Kp, Ki, Kd);
+    // printf("computed torque\n");
+
+    return {torque, new_int_error};
+            
 }
 
 // Computes torques using taskspace inverse dynamics
@@ -163,9 +183,13 @@ std::tuple<VectorXd, VectorXd, MatrixXd_rowMaj> get_torques(mjr_t *r, VectorXd d
     MatrixXd_rowMaj Jdot = (1/r->m->opt.timestep) * (prev_J - Jp);
     mj_comVel(r->m, r->d);
     Vector3d ee_pos;
-    Vector3d ee_vel;
+    // Vector3d ee_vel;
     mju_copy(ee_pos.data(), &r->d->xpos[3*ee_id], 3);
-    mju_copy(ee_vel.data(), &r->d->cvel[6*ee_id+3], 3);
+    // mju_copy(ee_vel.data(), &r->d->cvel[6*ee_id+3], 3);
+    VectorXd qvel = VectorXd::Zero(r->m->nv);
+    mju_copy(qvel.data(), r->d->qvel, r->m->nv);
+    Vector3d ee_vel = Jp*qvel;
+
     // std::cout << "jacobian : \n" << Jp << "\n";
     // Compute Jacobian inverse
     CompleteOrthogonalDecomposition<MatrixXd_rowMaj> cod(Jp);
@@ -174,7 +198,8 @@ std::tuple<VectorXd, VectorXd, MatrixXd_rowMaj> get_torques(mjr_t *r, VectorXd d
     // Compute taskpace inertia matrix
     // lambda = (J*Mq*JT).inverse();
     // MatrixXd_rowMaj cond_mat = 0.001*MatrixXd_rowMaj::Identity(3, 3);
-    // MatrixXd_rowMaj taskM = (Jp*fullM*Jp.transpose()).inverse();// + cond_mat).inverse();
+    // std::cout << "fullM inv\n" << fullM.inverse() << std::endl;
+    // MatrixXd_rowMaj taskM = (Jp*fullM.inverse()*Jp.transpose()).inverse();
     MatrixXd_rowMaj taskM = Jp_pinv.transpose() * fullM * Jp_pinv;
     // std::cout << "taskspace inertia M: \n" << taskM << "\n";
     // Get jointspace h matrix
@@ -188,6 +213,8 @@ std::tuple<VectorXd, VectorXd, MatrixXd_rowMaj> get_torques(mjr_t *r, VectorXd d
     // std::cout << "qdot:\n" << qdot << std::endl;
     // std::cout << "J inv xdot:\n" << Jp_pinv*ee_vel << std::endl;
     MatrixXd_rowMaj eta = Jp_pinv.transpose() * h;// - taskM*Jdot*qdot;     // Ignore Jdot term
+    // MatrixXd_rowMaj eta =  taskM* Jp * fullM.inverse() * h;
+    // std::cout << "eta\n" << eta << std::endl;
     // Compute torques
     // std::cout << "desired accels: \n" << desired_state.tail(3) << "\n";
     VectorXd pos_error = desired_state.head(3) - ee_pos;
@@ -437,13 +464,19 @@ int inv_kin_iter_test(mjr_t* robot, int argc, const char** argv) {
     // }
     // mj_forward(robot->m, robot->d);
 
+    robot->d->qpos[0] = 1.57;
+    robot->d->qpos[1] = 1.41;
+    robot->d->qpos[2] = 1.26;
+    robot->d->qpos[3] = 1.11;
+    robot->d->qpos[4] = 1.48;
+    // mj_forward(robot->m, robot->d);
     bool render_state = mjr_render(robot);
     bool done = false;
-    Vector3d end_ee(-0.5, -0.5, 0.0);
+    Vector3d end_ee(0.0, 0.0, 0.0);
 
     while(render_state) {
         if (!robot->paused and !done) {   
-            VectorXd final_qpos = inv_kin_iter(robot, end_ee, num_iters, 1e-5, damping);
+            VectorXd final_qpos = inv_kin_iter(robot, end_ee, num_iters, 1e-3, damping);
             mju_copy(robot->d->qpos, final_qpos.data(), robot->m->nq);
             done = true;
         }
@@ -507,7 +540,7 @@ int test_taskspace_inv_kin(mjr_t* robot, int argc, const char** argv) {
 // Tests the taskspace inverse dynamics method
 int test_taskspace_inv_dyn(mjr_t* robot, int argc, const char** argv) {
     if (argc < 4) {
-        printf("Error: requires 2 arguments of Kp, Ki, Kv gains.\n");
+        printf("Error: requires 3 arguments of Kp, Ki, Kv gains.\n");
         return 0;
     }
     double Kp = std::stod(argv[1]);
@@ -525,11 +558,11 @@ int test_taskspace_inv_dyn(mjr_t* robot, int argc, const char** argv) {
     VectorXd ee_pos_init(3);
     mju_copy(ee_pos_init.data(), &robot->d->xpos[3*ee_id], 3);
     VectorXd end_ee(3);
-    end_ee << -0.5, -0.5, 0.0;
+    end_ee << -1.0, 0.0, 0.0;
     std::cout << "init ee pos: " << ee_pos_init.format(CommaInitFmt) << std::endl;
     std::cout << "desired ee pos: " << end_ee.format(CommaInitFmt) << std::endl;
 
-    double total_t = 2.0;
+    double total_t = 20.0;
     Vector3d int_vel_error = Vector3d::Zero(3);
      // Get current end-effector Jacobian
     MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
@@ -538,12 +571,17 @@ int test_taskspace_inv_dyn(mjr_t* robot, int argc, const char** argv) {
     bool render_state = mjr_render(robot);
     VectorXd int_qpos_error = VectorXd::Zero(nq);
 
+    int int_max = 50;
+    int int_count = 0;
     while(robot->d->time < total_t and render_state) {
         if (!robot->paused) {          
-
+            if (int_count >= int_max) {
+                int_vel_error = Vector3d::Zero(3);
+                int_count = 0;
+            }
             // VectorXd desired_state = poly_traj5(ee_pos_init, end_ee, total_t , robot->d->time);
             VectorXd desired_state(9);
-            desired_state << -0.5, -0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
+            desired_state << -1.0, -0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
             std::cout << "desired state: " << desired_state.format(CommaInitFmt) << std::endl;
             VectorXd torque, new_int_vel_error;
             MatrixXd_rowMaj new_Jp;
@@ -639,16 +677,18 @@ int test_taskspace_accel(mjr_t* robot, int argc, const char** argv) {
 
 int letter_test(mjr_t* robot, int argc, const char** argv) {
     if (argc < 4) {
-        printf("Error: requires 2 arguments of Kp, Ki, Kv gains.\n");
+        printf("Error: requires 4 arguments of Kp, Ki, Kv gains and step count.\n");
         return 0;
     }
     double Kp = std::stod(argv[1]);
     double Ki = std::stod(argv[2]);
     double Kv = std::stod(argv[3]);
+    // Good gains are 15 0.0 4 and step count of 20
+    int step_count = std::stoi(argv[4]);     // How many steps to take before updating desired state
     bool debug = false;
     bool viz = true;
     bool save_data = false;
-    FILE *fp = fopen("./letter_test.csv", "w+");
+    FILE *fp = fopen("./robot_test.csv", "w+");
 
     int nq = robot->m->nq;
     int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
@@ -671,23 +711,10 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
     Vector3d int_pos_error = Vector3d::Zero(3);
 
     
-    std::ifstream letter_file("./trajectory_gen/cap_a_traj.csv");
+    std::ifstream letter_file("./trajectory_gen/robot_traj_resize.csv");
     if (!letter_file.is_open()) throw std::runtime_error("Could not open file");
 
     std::string line, col_value;
-    // std::getline(letter_file, line);
-    // std::stringstream init_ss(line);
-    // while (std::getline(init_ss, col_value, ',')) {
-    //     printf("%f ", std::stod(col_value));
-    // }
-    // printf("\n");
-    // std::getline(letter_file, line);
-    // std::stringstream next_ss(line);
-    // while (std::getline(next_ss, col_value, ',')) {
-    //     printf("%f ", std::stod(col_value));
-    // }
-    // printf("\n");
-    // return 1;
     
     // Give robot total_t to reach first desired state
     float total_t = 4.0;
@@ -745,7 +772,7 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
     }
 
     int_pos_error = Vector3d::Zero(3);
-    int step_count = 60;     // How many steps to take before updating desired state
+    
     int curr_step = 0;
     // Kp += 20;
     // Ki = 0.1;
@@ -767,13 +794,16 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
                     break;
                 }
                 std::getline(letter_file, line);    // Read next line of traj file 
+                if (line.empty()) {
+                    break;
+                }
                 // Extract desired state from string
                 std::stringstream ss(line);
                 // desired_state = Vector3d::Zero(6);
-                // std::cout << "line: " << line << std::endl;
+                std::cout << "line: " << line << std::endl;
                 for (int i = 0; i < 2; i++) {
                     std::getline(ss, col_value, ',');
-                    // std::cout << "col value: " << col_value << std::endl;
+                    std::cout << "col value: " << col_value << std::endl;
                     desired_state(i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
                     // desired_state(3*i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
                     // std::getline(ss, col_value, ',');
@@ -784,7 +814,7 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
                 if (save_data) {
                     fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
                     save_count += 1;
-                    if (save_count % 50 == 0) {
+                    if (save_count % 100 == 0) {
                         printf("Saved %i states\n", save_count);
                         printf("sim time: %f\n", robot->d->time);
                     }
@@ -808,12 +838,12 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
             if (debug) {
                 std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
                 printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
-                printf("sim time: %f", robot->d->time);
+                printf("sim time: %f\n", robot->d->time);
             }
             curr_step += 1;
             int_count += 1;
             curr_vis += 1;
-            if (curr_vis >= vis_count) {
+            if (viz && curr_vis >= vis_count) {
                 render_state = mjr_render(robot);
                 curr_vis = 0;
             }
@@ -823,7 +853,8 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
             }
         }
     }
-    printf("sim time: %f", robot->d->time);
+    printf("sim time: %f\n", robot->d->time);
+    printf("done\n");
 
     // while (std::getline(letter_file, line)) {
     //     std::stringstream ss(line);
@@ -841,6 +872,335 @@ int letter_test(mjr_t* robot, int argc, const char** argv) {
 
 }
 
+int letter_test_IK(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 4) {
+        printf("Error: requires 4 arguments of Kp, Ki, Kv gains and step count.\n");
+        return 0;
+    }
+    double Kp = std::stod(argv[1]);
+    double Ki = std::stod(argv[2]);
+    double Kd = std::stod(argv[3]);
+    int step_count = std::stoi(argv[4]);     // How many steps to take before updating desired state
+    bool debug = false;
+    bool viz = false;
+    bool save_data = true;
+    FILE *fp = fopen("./robot_test_ik.csv", "w+");
+
+    int nq = robot->m->nq;
+    int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
+
+    // for (int i = 0; i < nq; i++) {
+    //     robot->d->qpos[i] = 1.5;
+    // }
+    robot->d->qpos[0] = 1.57;
+    robot->d->qpos[1] = 1.41;
+    robot->d->qpos[2] = 1.26;
+    robot->d->qpos[3] = 1.11;
+    robot->d->qpos[4] = 1.48;
+    mj_forward(robot->m, robot->d);
+     // Get current end-effector Jacobian
+    MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
+    mj_jacBody(robot->m, robot->d, prev_Jp.data(), NULL, ee_id);
+    bool render_state = true;
+    if (viz) {
+        render_state = mjr_render(robot);
+    } else{
+        mjr_close_render(robot);
+    }
+    VectorXd int_pos_error = VectorXd::Zero(nq);
+
+    
+    std::ifstream letter_file("./trajectory_gen/robot_traj_resize.csv");
+    if (!letter_file.is_open()) throw std::runtime_error("Could not open file");
+
+    std::string line, col_value;
+    
+    // Give robot total_t to reach first desired state
+    float total_t = 4.0;
+    std::getline(letter_file, line);    // Read next line of traj file 
+    // Extract desired state from string
+    std::stringstream init_ss(line);
+    VectorXd desired_state(3);
+    for (int i = 0; i < 2; i++) {
+        std::getline(init_ss, col_value, ',');
+        desired_state(i) = std::stod(col_value);
+    }
+    desired_state(2) = 0.0;
+    int int_count = 0;
+    int int_max = 20;
+    int save_count = 0;
+    int vis_count = 100;
+    int curr_vis = 0;
+    
+    // while(robot->d->time < total_t and render_state) {
+    //     if (!robot->paused || !viz) {        
+    //         if (int_count >= int_max) {
+    //             int_count = 0;
+    //             int_pos_error = VectorXd::Zero(nq);
+    //         }
+            
+    //         VectorXd torque; 
+    //         std::tie(torque, int_pos_error) = IK_joint_PID(robot, desired_state.head(3), int_pos_error, Kp, Ki, Kd);
+    //         // std::cout << "torque\n" << torque << std::endl;
+    //         mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+    //         mj_step(robot->m, robot->d);
+
+    //         if (debug) {
+    //             std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+    //             printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    //         }
+    //         int_count += 1;
+    //         curr_vis += 1;
+            
+    //     } 
+    //     if (viz) {
+    //         render_state = mjr_render(robot);
+    //     }
+        
+    // }
+
+    int_pos_error = VectorXd::Zero(nq);
+    
+    int curr_step = 0;
+    int count = 0;
+    // Kp += 20;
+    // Ki = 0.1;
+    // Kv -= 2;
+    int_max = 100;
+    curr_vis = 0;
+    if (save_data) {
+        fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    }
+    while(!letter_file.eof() and render_state) {
+        if (!robot->paused || !viz) {   
+            if (int_count >= int_max) {
+                int_count = 0;
+                int_pos_error = VectorXd::Zero(nq);
+            }
+
+            if (curr_step == step_count) { 
+                std::getline(letter_file, line);    // Read next line of traj file 
+                if (line.empty()) {
+                    break;
+                }
+                // Extract desired state from string
+                std::stringstream ss(line);
+                // desired_state = Vector3d::Zero(6);
+                // std::cout << "line: " << line << std::endl;
+                for (int i = 0; i < 2; i++) {
+                    std::getline(ss, col_value, ',');
+                    // std::cout << "col value: " << col_value << std::endl;
+                    desired_state(i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
+                }
+                desired_state(2) = 0.0;
+                curr_step = 0;
+                if (save_data) {
+                    fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                    save_count += 1;
+                    if (save_count % 100 == 0) {
+                        printf("Saved %i states\n", save_count);
+                        printf("sim time: %f\n", robot->d->time);
+                    }
+                }
+            }
+            
+            VectorXd torque; 
+            std::tie(torque, int_pos_error) = IK_joint_PID(robot, desired_state.head(3), int_pos_error, Kp, Ki, Kd);
+            // std::cout << "torque\n" << torque << std::endl;
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+            mj_step(robot->m, robot->d);
+           
+            if (debug) {
+                std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+                printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                printf("sim time: %f\n", robot->d->time);
+            }
+            curr_step += 1;
+            int_count += 1;
+            curr_vis += 1;
+            if (viz && curr_vis >= vis_count) {
+                render_state = mjr_render(robot);
+                curr_vis = 0;
+            }
+        } else {
+            if (viz) {
+                render_state = mjr_render(robot);
+            }
+        }
+        count += 1;
+    }
+    printf("sim time: %f\n", robot->d->time);
+
+    return 1;
+
+}
+
+int letter_test_inv_dyn(mjr_t* robot, int argc, const char** argv) {
+    if (argc < 4) {
+        printf("Error: requires 4 arguments of Kp, Ki, Kv gains and step count.\n");
+        return 0;
+    }
+    double Kp = std::stod(argv[1]);
+    double Ki = std::stod(argv[2]);
+    double Kv = std::stod(argv[3]);
+    // Good gains seem to be 0.05 0.0 0.5 with step count of 40
+    int step_count = std::stoi(argv[4]);     // How many steps to take before updating desired state
+    bool debug = false;
+    bool viz = false;
+    bool save_data = true;
+    FILE *fp = fopen("./robot_test_inv_dyn.csv", "w+");
+
+    int nq = robot->m->nq;
+    int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
+
+    // for (int i = 0; i < nq; i++) {
+    //     robot->d->qpos[i] = 1.5;
+    // }
+    robot->d->qpos[0] = 1.57;
+    robot->d->qpos[1] = 1.41;
+    robot->d->qpos[2] = 1.26;
+    robot->d->qpos[3] = 1.11;
+    robot->d->qpos[4] = 1.48;
+    mj_forward(robot->m, robot->d);
+     // Get current end-effector Jacobian
+    MatrixXd_rowMaj prev_Jp(3, robot->m->nv);       // position Jacobian
+    mj_jacBody(robot->m, robot->d, prev_Jp.data(), NULL, ee_id);
+    bool render_state = true;
+    if (viz) {
+        render_state = mjr_render(robot);
+    } else{
+        mjr_close_render(robot);
+    }
+    VectorXd int_pos_error = VectorXd::Zero(3);
+
+    
+    std::ifstream letter_file("./trajectory_gen/robot_traj_resize.csv");
+    if (!letter_file.is_open()) throw std::runtime_error("Could not open file");
+
+    std::string line, col_value;
+    
+    // Give robot total_t to reach first desired state
+    float total_t = 4.0;
+    std::getline(letter_file, line);    // Read next line of traj file 
+    // Extract desired state from string
+    std::stringstream init_ss(line);
+    VectorXd desired_state = VectorXd::Zero(9);
+    for (int i = 0; i < 2; i++) {
+        std::getline(init_ss, col_value, ',');
+        desired_state(i) = std::stod(col_value);
+    }
+    desired_state(2) = 0.0;
+    std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+    int int_count = 0;
+    int int_max = 20;
+    int save_count = 0;
+    int vis_count = 100;
+    int curr_vis = 0;
+    
+    // while(robot->d->time < total_t and render_state) {
+    //     if (!robot->paused || !viz) {        
+    //         if (int_count >= int_max) {
+    //             int_count = 0;
+    //             int_pos_error = VectorXd::Zero(nq);
+    //         }
+            
+    //         VectorXd torque; 
+    //         std::tie(torque, int_pos_error) = IK_joint_PID(robot, desired_state.head(3), int_pos_error, Kp, Ki, Kd);
+    //         // std::cout << "torque\n" << torque << std::endl;
+    //         mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+    //         mj_step(robot->m, robot->d);
+
+    //         if (debug) {
+    //             std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+    //             printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    //         }
+    //         int_count += 1;
+    //         curr_vis += 1;
+            
+    //     } 
+    //     if (viz) {
+    //         render_state = mjr_render(robot);
+    //     }
+        
+    // }
+
+    int_pos_error = VectorXd::Zero(3);
+    
+    int curr_step = 0;
+    int count = 0;
+    // Kp += 20;
+    // Ki = 0.1;
+    // Kv -= 2;
+    int_max = 100;
+    curr_vis = 0;
+    if (save_data) {
+        fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+    }
+    while(!letter_file.eof() and render_state) {
+        if (!robot->paused || !viz) {   
+            if (int_count >= int_max) {
+                int_count = 0;
+                int_pos_error = VectorXd::Zero(3);
+            }
+
+            if (curr_step == step_count) { 
+                std::getline(letter_file, line);    // Read next line of traj file 
+                if (line.empty()) {
+                    break;
+                }
+                // Extract desired state from string
+                std::stringstream ss(line);
+                // desired_state = Vector3d::Zero(6);
+                // std::cout << "line: " << line << std::endl;
+                for (int i = 0; i < 2; i++) {
+                    std::getline(ss, col_value, ',');
+                    // std::cout << "col value: " << col_value << std::endl;
+                    desired_state(i) = std::max(-4.5, std::min(std::stod(col_value), 4.5));
+                }
+                desired_state(2) = 0.0;
+                curr_step = 0;
+                if (save_data) {
+                    fprintf(fp, "%f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                    save_count += 1;
+                    if (save_count % 100 == 0) {
+                        printf("Saved %i states\n", save_count);
+                        printf("sim time: %f\n", robot->d->time);
+                    }
+                }
+            }
+            
+            VectorXd torque, new_int_pos_error;
+            MatrixXd_rowMaj new_Jp;
+            std::tie(torque, new_int_pos_error, new_Jp) = get_torques(robot, desired_state, int_pos_error, prev_Jp, Kp, Ki, Kv);
+            prev_Jp = new_Jp.replicate(1,1);
+            int_pos_error = new_int_pos_error.replicate(1, 1);
+            mju_copy(robot->d->ctrl, torque.data(), robot->m->nu);
+            mj_step(robot->m, robot->d);
+           
+            if (debug) {
+                std::cout << "desired state:" << desired_state.format(CommaInitFmt) << std::endl;
+                printf("ee pos: %f, %f, %f\n", robot->d->xpos[3*ee_id], robot->d->xpos[3*ee_id+1], robot->d->xpos[3*ee_id+2]);
+                printf("sim time: %f\n", robot->d->time);
+            }
+            curr_step += 1;
+            int_count += 1;
+            curr_vis += 1;
+            if (viz && curr_vis >= vis_count) {
+                render_state = mjr_render(robot);
+                curr_vis = 0;
+            }
+        } else {
+            if (viz) {
+                render_state = mjr_render(robot);
+            }
+        }
+        count += 1;
+    }
+    printf("sim time: %f\n", robot->d->time);
+
+    return 1;
+
+}
 
 // main function
 int main(int argc, const char** argv) {
@@ -854,7 +1214,7 @@ int main(int argc, const char** argv) {
         mju_error("Could not initialize GLFW");
 
     // ur5_t* robot = ur5_init();
-    mjr_t* robot = mjr_init("./model/plane_arm_big.xml");
+    mjr_t* robot = mjr_init("./model/plane_arm_big_waypoints.xml");
 
     // test_joint_PID_single(robot, argc, argv);
     // test_joint_PID_all(robot, argc, argv);
@@ -862,7 +1222,9 @@ int main(int argc, const char** argv) {
     // test_taskspace_inv_kin(robot, argc, argv);
     // test_taskspace_inv_dyn(robot, argc, argv);
     // test_taskspace_accel(robot, argc, argv);
-    letter_test(robot, argc, argv);
+    // letter_test(robot, argc, argv);
+    // letter_test_IK(robot, argc, argv);
+    letter_test_inv_dyn(robot, argc, argv);
     mjr_free(robot);
  
     return 1;

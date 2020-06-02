@@ -443,14 +443,18 @@ void mjr_free(mjr_t* r) {
     mj_deactivate();
 
     // Close window
-    glfwDestroyWindow(r->window);
+    if (r->window) {
+        glfwDestroyWindow(r->window);
+    }
 
     free(r);
 
 }
 
 void mjr_close_render(mjr_t *r) {
+    // glfwSetWindowShouldClose(r->window, true);
     glfwDestroyWindow(r->window);
+    r->window = NULL;
 }
 
 bool mjr_render(mjr_t *r) {

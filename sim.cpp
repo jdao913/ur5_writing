@@ -20,7 +20,7 @@ int main(int argc, const char** argv)
         mju_error("Could not initialize GLFW");
 
     // ur5_t* robot = ur5_init();
-    mjr_t* robot = mjr_init("./model/plane_arm_big.xml");
+    mjr_t* robot = mjr_init("./model/plane_arm_big_waypoints.xml");
     int ee_id = mj_name2id(robot->m, mjOBJ_BODY, "EE");     // Get end-effector body id in mujoco model
 
     // bool render_state = ur5_render(robot);

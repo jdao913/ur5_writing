@@ -51,7 +51,7 @@
                             <joint name="joint4"/>
                             <!-- <site type='sphere' name='EE' size='.02' pos='0.5 0.0 0'/> -->
                             <body name="EE" pos="1 0 0">
-                                <geom name="EE" type="sphere" size="0.045" rgba=".76 .76 .17 1" group="1"/>
+                                <geom name="EE" type="sphere" size="0.045" rgba=".76 .76 .17 1" group="1" contype="64" conaffinity="64"/>
                             </body>
                         </body>
                     </body>
