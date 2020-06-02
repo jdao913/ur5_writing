@@ -4,6 +4,10 @@
 #include "string.h"
 #include "mujoco.h"
 #include "glfw3.h"
+#include <eigen3/Eigen/Dense>
+
+using namespace Eigen;
+
 
 struct mj_robot {
     // MuJoCo stuff
@@ -46,6 +50,8 @@ struct mj_robot {
 };
 
 typedef struct mj_robot mjr_t;
+typedef Matrix<double, -1, -1, RowMajor> MatrixXd_rowMaj;
+
 
 mjr_t *mjr_init(const char* modelfile);
 void mjr_free(mjr_t* r);

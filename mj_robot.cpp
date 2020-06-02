@@ -5,7 +5,6 @@
 #include "mujoco.h"
 #include "glfw3.h"
 #include "mj_robot.h"
-
 #include <chrono>
 
 // help strings

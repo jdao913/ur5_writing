@@ -28,7 +28,7 @@ sim:
 	$(CC) $(INC) $(CFLAGS) sim.cpp mj_robot.cpp $(LIBS) -o sim
 
 control:
-	$(CC) $(INC) $(CFLAGS) control.cpp mj_robot.cpp $(LIBS) -o control
+	$(CC) $(INC) $(CFLAGS) control.cpp mj_robot.cpp inv_kin.cpp task_accel.cpp joint_PID.cpp task_inv_dyn.cpp $(LIBS) -o control
 
 
 # Virtual targets
