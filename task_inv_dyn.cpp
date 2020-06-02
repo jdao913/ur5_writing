@@ -65,7 +65,6 @@ int test_taskspace_inv_dyn(mjr_t* robot, int argc, const char** argv) {
     double Ki = std::stod(argv[2]);
     double Kv = std::stod(argv[3]);
     int nq = robot->m->nq;
-    int nv = robot->m->nv;
 
     for (int i = 0; i < nq; i++) {
         robot->d->qpos[i] = 1;

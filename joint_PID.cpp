@@ -35,7 +35,6 @@ std::tuple<VectorXd, VectorXd> joint_PID(mjr_t *r, VectorXd des_pos, VectorXd de
     VectorXd qvel(r->m->nv);
     mju_copy(qpos.data(), r->d->qpos, r->m->nq);
     mju_copy(qvel.data(), r->d->qvel, r->m->nv);
-    // std::cout << "qpos: " << qpos.format(CommaInitFmt) << std::endl;
 
     // Compute commanded joint acceleration
     VectorXd pos_error = des_pos - qpos;
@@ -62,9 +61,11 @@ VectorXd inv_dyn(mjr_t *r, VectorXd joint_accel) {
     mj_crb(r->m, r->d);      // Call mj_crb first to compute qM
     MatrixXd_rowMaj fullM(r->m->nv, r->m->nv);
     mj_fullM(r->m, fullM.data(), r->d->qM);
+
     // Get jointspace h matrix
     MatrixXd_rowMaj h(r->m->nv, 1);
     mj_rne(r->m, r->d, 0, h.data());
+    
     // Compute torque
     VectorXd torque = fullM * joint_accel;// + h;
     return torque;

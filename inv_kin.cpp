@@ -39,7 +39,6 @@ VectorXd inv_kin_iter(mjr_t *r, Vector3d des_pos, int iters, double tol, double 
         for (int i = 0; i < r->m->nq; i++) {
             d_copy->qpos[i] += step_size*q_error(i);
         }
-        // printf("iter %i\t ee pos error: %f\n", k, task_pos_error.norm());
         if (task_pos_error.norm() < tol) {      // Stop if already within tolerance
             break;
         }
@@ -84,14 +83,12 @@ int inv_kin_iter_test(mjr_t* robot, int argc, const char** argv) {
     // for (int i = 0; i < nq; i++) {
     //     robot->d->qpos[i] = 1;
     // }
-    // mj_forward(robot->m, robot->d);
-
     robot->d->qpos[0] = 1.57;
     robot->d->qpos[1] = 1.41;
     robot->d->qpos[2] = 1.26;
     robot->d->qpos[3] = 1.11;
     robot->d->qpos[4] = 1.48;
-    // mj_forward(robot->m, robot->d);
+
     bool render_state = mjr_render(robot);
     bool done = false;
     Vector3d end_ee(0.0, 0.0, 0.0);
