@@ -122,7 +122,7 @@ def traj_gen(input_str):
     #print(trajectory.shape)
     return trajectory
 
-trajectory = traj_gen('Howisurprojectgoing')
+trajectory = traj_gen('Hello')
 
 fig, ax = plt.subplots(3, 1)
 
